@@ -65,5 +65,6 @@ thresholds at the top of `reward_core.py`).
 
 - Needs the corporate network/VPN (hits the alborz scm ADO + time-log API).
 - Only Thu/Fri count as non-working (Iranian public holidays aren't flagged).
-- Q8 counts all-time child bugs of resolved PBIs; a PBI worked by several people
-  contributes its bugs to each.
+- Q8 counts child bugs **created inside the window** on resolved PBIs, each bug
+  once. A PBI is attributed to a single owner (the member who logged the most
+  time on it), so a shared PBI no longer adds its bugs to every contributor.

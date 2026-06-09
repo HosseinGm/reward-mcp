@@ -51,6 +51,16 @@ def _in(ids) -> str:
     return ",".join(str(i) for i in ids)
 
 
+def _parse_date(s: str | None) -> date | None:
+    """Parse an ADO datetime string (e.g. '2024-10-05T08:32:17.4Z') to a date."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
 async def _wiql_ids(ado, project: str, wiql: str) -> set[int]:
     res = await ado.post(f"{project}/_apis/wit/wiql", {"query": wiql})
     return {w["id"] for w in res.get("workItems", [])}
@@ -112,6 +122,20 @@ async def gather(team: str, date_from: str | None, date_to: str | None,
         union = sorted({it["pbi_id"] for mm in members.values()
                         for it in mm["pbis"].values() if it["pbi_id"] is not None})
 
+        # Owner of each PBI = the member who logged the most time on it in the
+        # window. Bugs are attributed only to the owner so a PBI worked by several
+        # people contributes its bugs once, not once per person.
+        pbi_owner: dict[int, str] = {}
+        _owner_min: dict[int, int] = {}
+        for uidl, mm in members.items():
+            for it in mm["pbis"].values():
+                pid = it["pbi_id"]
+                if pid is None:
+                    continue
+                if it["minutes"] > _owner_min.get(pid, -1):
+                    _owner_min[pid] = it["minutes"]
+                    pbi_owner[pid] = uidl
+
         emergency_set: set[int] = set()
         resolved_set: set[int] = set()
         bugs_by_pbi: dict[int, int] = {}
@@ -132,18 +156,27 @@ async def gather(team: str, date_from: str | None, date_to: str | None,
                     f"[System.WorkItemType] = 'Bug' AND [System.Parent] IN "
                     f"({_in(sorted(resolved_set))})")
                 if bug_ids:
-                    items = await ado.work_items_batch(sorted(bug_ids),
-                                                       ["System.Parent"])
+                    items = await ado.work_items_batch(
+                        sorted(bug_ids), ["System.Parent", "System.CreatedDate"])
+                    # Count each child Bug once, only if it was CREATED inside the
+                    # window. A bug has a single System.Parent, so tallying by
+                    # parent PBI de-dupes; single-owner attribution is done in
+                    # metrics() via pbi_owner.
                     for it in items:
-                        parent = it.get("fields", {}).get("System.Parent")
-                        if parent is not None:
-                            bugs_by_pbi[parent] = bugs_by_pbi.get(parent, 0) + 1
+                        f = it.get("fields", {})
+                        parent = f.get("System.Parent")
+                        if parent is None:
+                            continue
+                        created = _parse_date(f.get("System.CreatedDate"))
+                        if created is None or not (earliest <= created <= latest):
+                            continue
+                        bugs_by_pbi[parent] = bugs_by_pbi.get(parent, 0) + 1
 
         return {"project": project, "team": t["name"],
                 "window": {"from": earliest.isoformat(), "to": latest.isoformat()},
                 "members": members, "working_days": working_days,
                 "emergency_set": emergency_set, "resolved_set": resolved_set,
-                "bugs_by_pbi": bugs_by_pbi}
+                "bugs_by_pbi": bugs_by_pbi, "pbi_owner": pbi_owner}
     finally:
         await ado.aclose()
 
@@ -152,8 +185,10 @@ def metrics(data: dict) -> list[dict]:
     """The 8 raw parameters per member. NO scoring/ranking — just the data,
     sorted by hours so it's easy to read."""
     weekend = timelog.WEEKEND
+    pbi_owner = data["pbi_owner"]
     rows: list[dict] = []
     for mm in data["members"].values():
+        uidl = mm["user_id"].lower()
         daily = mm["daily"]                       # {date: minutes}
         items = list(mm["pbis"].values())
         pbi_ids = {it["pbi_id"] for it in items if it["pbi_id"] is not None}
@@ -173,7 +208,8 @@ def metrics(data: dict) -> list[dict]:
             "q7_deep_items": sum(1 for it in items
                                  if it["minutes"] > DEEP_HOURS * 60),
             "q8_bugs": sum(data["bugs_by_pbi"].get(pid, 0) for pid in pbi_ids
-                           if pid in data["resolved_set"]),
+                           if pid in data["resolved_set"]
+                           and pbi_owner.get(pid) == uidl),
         })
     rows.sort(key=lambda r: -r["q1_hours"])
     return rows

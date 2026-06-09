@@ -41,7 +41,8 @@ async def reward_report(team: str, date_from: str, date_to: str,
       q5_emergencies             distinct emergency PBIs (IsEmergency = بله)
       q6_items                   distinct PBIs they logged time on
       q7_deep_items              PBIs where they logged > 30h
-      q8_bugs                    child Bugs on their resolved PBIs (all-time)
+      q8_bugs                    child Bugs CREATED in-window on resolved PBIs
+                                 they own (top time-logger); each bug counted once
     """
     return await rc.report(team, date_from, date_to, score)
 
