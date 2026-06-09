@@ -42,7 +42,11 @@ async def reward_report(team: str, date_from: str, date_to: str,
       q6_items                   distinct PBIs they logged time on
       q7_deep_items              PBIs where they logged > 30h
       q8_bugs                    child Bugs CREATED in-window on resolved PBIs
-                                 they own (top time-logger); each bug counted once
+                                 they own (top time-logger); each bug counted once.
+                                 Developer-side defect signal.
+      q8b_bugs_created           Bugs in the project the member AUTHORED
+                                 (System.CreatedBy) in-window. Tester-side
+                                 contribution — bugs they found/reported.
     """
     return await rc.report(team, date_from, date_to, score)
 
@@ -53,9 +57,10 @@ def reward_suggest(team: str, date_from: str, date_to: str) -> str:
     return (
         f"Call the `reward_report` tool with team='{team}', "
         f"date_from='{date_from}', date_to='{date_to}', score=false. "
-        "Then present ALL 8 parameters for EVERY member in one table: "
+        "Then present ALL parameters for EVERY member in one table: "
         "Q1 hours, Q2 weekend (days/hours), Q3 >8h days, Q4 low days, "
-        "Q5 emergencies, Q6 items, Q7 >30h items, Q8 bugs. Keep the tool's "
+        "Q5 emergencies, Q6 items, Q7 >30h items, Q8 bugs (dev defect signal), "
+        "Q8b bugs created (tester-reported bugs). Keep the tool's "
         "order (most hours first). Do NOT use team_time_logged. Do NOT score, "
         "rank, or recommend — the user is reviewing raw data."
     )

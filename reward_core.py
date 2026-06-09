@@ -172,11 +172,42 @@ async def gather(team: str, date_from: str | None, date_to: str | None,
                             continue
                         bugs_by_pbi[parent] = bugs_by_pbi.get(parent, 0) + 1
 
+        # Bugs CREATED (reported) by each member in the window — the tester-side
+        # contribution. q8_bugs above credits the developer who owns the resolved
+        # work a bug was found in; that leaves testers (who don't own dev PBIs) at
+        # ~0. This counts every Bug in the project authored by a team member,
+        # by System.CreatedBy identity, independent of PBI ownership/state.
+        bugs_created_by: dict[str, int] = {}
+        member_ids = set(members.keys())          # identity ids, already lowercased
+        created_ids = await _wiql_ids(
+            ado, project,
+            "SELECT [System.Id] FROM WorkItems WHERE "
+            f"[System.TeamProject] = '{project}' "
+            "AND [System.WorkItemType] = 'Bug' "
+            f"AND [System.CreatedDate] >= '{earliest.isoformat()}' "
+            f"AND [System.CreatedDate] < '{(latest + timedelta(days=1)).isoformat()}'")
+        if created_ids:
+            items = await ado.work_items_batch(
+                sorted(created_ids), ["System.CreatedBy", "System.CreatedDate"])
+            for it in items:
+                f = it.get("fields", {})
+                created = _parse_date(f.get("System.CreatedDate"))
+                if created is None or not (earliest <= created <= latest):
+                    continue
+                cb = f.get("System.CreatedBy")
+                cid = cb.get("id") if isinstance(cb, dict) else None
+                if not cid:
+                    continue
+                cidl = cid.lower()
+                if cidl in member_ids:
+                    bugs_created_by[cidl] = bugs_created_by.get(cidl, 0) + 1
+
         return {"project": project, "team": t["name"],
                 "window": {"from": earliest.isoformat(), "to": latest.isoformat()},
                 "members": members, "working_days": working_days,
                 "emergency_set": emergency_set, "resolved_set": resolved_set,
-                "bugs_by_pbi": bugs_by_pbi, "pbi_owner": pbi_owner}
+                "bugs_by_pbi": bugs_by_pbi, "pbi_owner": pbi_owner,
+                "bugs_created_by": bugs_created_by}
     finally:
         await ado.aclose()
 
@@ -210,6 +241,7 @@ def metrics(data: dict) -> list[dict]:
             "q8_bugs": sum(data["bugs_by_pbi"].get(pid, 0) for pid in pbi_ids
                            if pid in data["resolved_set"]
                            and pbi_owner.get(pid) == uidl),
+            "q8b_bugs_created": data["bugs_created_by"].get(uidl, 0),
         })
     rows.sort(key=lambda r: -r["q1_hours"])
     return rows

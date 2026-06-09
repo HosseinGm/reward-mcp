@@ -68,3 +68,8 @@ thresholds at the top of `reward_core.py`).
 - Q8 counts child bugs **created inside the window** on resolved PBIs, each bug
   once. A PBI is attributed to a single owner (the member who logged the most
   time on it), so a shared PBI no longer adds its bugs to every contributor.
+  This is a **developer-side** defect signal.
+- Q8b (`q8b_bugs_created`) counts bugs the member **authored** (`System.CreatedBy`)
+  anywhere in the project, created inside the window. This is the **tester-side**
+  contribution — bugs they found/reported — since testers don't own dev PBIs and
+  would otherwise score 0 on Q8.
